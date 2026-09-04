@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS user (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
 
 -- 初始测试用户 (密码: 123456)
-INSERT INTO user (username, password, phone, real_name, role) VALUES
+INSERT INTO user (username, password, phone, real_name, car_plate, role) VALUES
 ('admin', '$2a$10$o.VwsdPhxkayzgHu.QDnCeXC8BqZQb/wDjYF17sKqgwcaUS0ZPyL2', '13800000000', '管理员', '粤A88888', 'OWNER'),
 ('user1', '$2a$10$o.VwsdPhxkayzgHu.QDnCeXC8BqZQb/wDjYF17sKqgwcaUS0ZPyL2', '13800000001', '张三', '粤A12345', 'USER');
 

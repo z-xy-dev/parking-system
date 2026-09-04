@@ -1,8 +1,8 @@
 # 共享停车位系统
 
-[![Build](https://github.com/your-username/parking-system/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/parking-system/actions/workflows/ci.yml)
+[![Build](https://github.com/z-xy-dev/parking-system/actions/workflows/ci.yml/badge.svg)](https://github.com/z-xy-dev/parking-system/actions/workflows/ci.yml)
 
-> ⚠️ 提交到 GitHub 后，请将上述徽章中的 `your-username` 替换为你自己的仓库所有者；CI 工作流见 `.github/workflows/ci.yml`（拉取代码后自动跑 `mvn package`）。
+> CI 工作流见 `.github/workflows/ci.yml`（推送后自动跑 `mvn clean package`）。
 
 基于 Spring Cloud Alibaba 微服务架构的共享停车位预订平台，实现用户注册登录、车位发布与搜索、订单管理、模拟支付等完整业务闭环。
 
@@ -126,17 +126,19 @@ parking-system/
 | Node.js | 18+ | 前端构建 |
 | Nacos | 2.x+ | 服务注册中心，需 standalone 模式启动 |
 
-> **Nacos 3.x 注意**：如果使用 Nacos 3.x，需要配置用户名密码。在各服务的 `application.properties` 中已配置 `spring.cloud.nacos.discovery.username` 和 `password`，默认值为 `nacos / nacos`，请根据实际环境修改。
+> **Nacos 3.x 注意**：如果使用 Nacos 3.x，控制台端口已改为 **8083**（服务发现端口仍为 8848），且需要配置用户名密码。在各服务的 `application.properties` 中已配置 `spring.cloud.nacos.discovery.username` 和 `password`，默认值为 `nacos / nacos`，请根据实际环境修改。
 
 ### 启动步骤
 
 #### 1. 初始化数据库
 
 ```bash
-mysql -uroot -p < sql/init.sql
+mysql -uroot -p --default-character-set=utf8mb4 < sql/init.sql
 ```
 
 该脚本会创建 `user_db`、`parking_db`、`order_db`、`payment_db` 四个数据库及对应表结构，并插入测试数据。
+
+> 💡 **字符集提示**：中文测试数据在 Git Bash / PowerShell 默认客户端字符集下可能插入失败（报 `Data too long for column`）。`--default-character-set=utf8mb4` 显式指定客户端字符集即可避免。如已用 navicat/HeidiSQL 等 GUI 导入则不受影响。
 
 #### 2. 配置数据库连接与中间件（环境变量）
 
@@ -153,6 +155,7 @@ mysql -uroot -p < sql/init.sql
 | `NACOS_HOST` | `localhost` | Nacos 地址 |
 | `NACOS_PORT` | `8848` | Nacos 端口 |
 | `NACOS_PASSWORD` | `<your-nacos-password>` | Nacos 密码（Nacos 3.x） |
+| `JWT_SECRET` | `parking-system-shared-secret-key-2024` | JWT 签名密钥（**生产环境务必覆盖为 ≥32 字节随机字符串**，否则 token 可被伪造，详见下方「安全提示」） |
 
 示例（Linux/Mac 启动服务时注入）：
 
@@ -162,6 +165,10 @@ DB_PASSWORD='yourStrongPwd' NACOS_PASSWORD='nacos' \
 ```
 
 > ⚠️ 本仓库源码中**不包含任何真实密码**：所有敏感配置均通过环境变量注入，默认值仅为占位符 `changeme`。克隆后请在本地用环境变量设置你自己的实际密码。
+
+> ⚠️ **安全提示（生产必读）**
+> - **MySQL / Nacos 密码**：`changeme` 仅供本地占位，部署前必须通过 `DB_PASSWORD` / `NACOS_PASSWORD` 环境变量覆盖。
+> - **JWT 签名密钥**：默认密钥 `parking-system-shared-secret-key-2024` 是公开字符串，**生产部署前必须通过 `JWT_SECRET` 注入自定义密钥**（≥32 字节随机字符串），否则攻击者可伪造任意用户 token。所有服务（gateway / user / parking / order / payment）启动时设置同一 `JWT_SECRET` 即可保持 token 互通。
 
 **本地开发环境变量**：源码中各密码的默认值均为占位符 `changeme`，启动服务前需在终端导出你本地 MySQL / Nacos 的**实际密码**，否则无法连接：
 
@@ -189,7 +196,7 @@ bin/startup.cmd -m standalone    # Windows
 redis-server                     # Windows (需提前安装 Redis)
 ```
 
-访问 http://localhost:8848/nacos 确认 Nacos 启动成功。
+访问 http://localhost:8083/ 确认 Nacos 启动成功（Nacos 3.x 控制台端口为 **8083**，服务发现端口仍为 8848）。
 确认 Redis 在 localhost:6379 运行（可用 `redis-cli ping` 验证返回 PONG）。
 
 #### 4. 构建后端微服务
@@ -236,7 +243,7 @@ npm run dev
 |------|------|
 | http://localhost:5173 | 前端页面 |
 | http://localhost:8080/doc.html | 接口文档 (Knife4j) |
-| http://localhost:8848/nacos | Nacos 控制台 (nacos/nacos) |
+| http://localhost:8848/nacos | Nacos 控制台（Nacos 3.x 请使用 8083 端口） (nacos/nacos) |
 
 ### 测试账号
 
