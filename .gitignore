@@ -1,0 +1,51 @@
+# Java
+target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+
+# Frontend
+node_modules/
+dist/
+*.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Maven
+.mvn/wrapper/maven-wrapper.jar
+
+# Temp
+*.bat
+
+# WorkBuddy project data (not source)
+.workbuddy/
+
+# Local Maven repo (managed runtime, huge)
+.m2-repo/
+
+# Runtime artifacts
+derby.log
+work/
+
+# Secrets / local env
+.env
+*.key
+*.pem
+*.pfx
+
+# 本地运行备忘（含真实密码，勿上传）
+LOCAL_NOTES.md

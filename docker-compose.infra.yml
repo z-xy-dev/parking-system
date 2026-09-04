@@ -1,0 +1,226 @@
+# 停车系统 - 基础设施集群（本机模拟）
+# 一键拉起：Nacos 集群(3) + MySQL 主从 + Redis 哨兵(1主2从+3哨兵)
+#
+# 注意：本机若已运行原生 MySQL(3306)/Redis(6379)/Nacos(8848)，端口会冲突。
+# 启动前请先停止它们（或把下方 published 端口改成不冲突的值）：
+#   - 停原生 Nacos / MySQL / Redis
+#   - 若 Redis 容器 redis-parking / ai-rag-redis 占用 6379，先 docker stop 它们
+#
+# 用法：
+#   docker compose -f docker-compose.infra.yml up -d
+#   docker compose -f docker-compose.infra.yml down
+#
+# 应用侧接入（在 start-app-cluster.sh 或环境变量中设置）：
+#   NACOS_SERVER_ADDR=localhost:8848,localhost:8849,localhost:8850
+#   REDIS_SENTINEL_MASTER=mymaster
+#   REDIS_SENTINEL_NODES=localhost:26379,localhost:26380,localhost:26381
+#   DB_HOST=localhost  DB_PORT=3306   （连主库；生产应改连 ProxySQL/VIP）
+
+networks:
+  parking-net:
+    driver: bridge
+
+services:
+  # ===================== Nacos 集群 (3 节点) =====================
+  nacos-1:
+    image: nacos/nacos-server:v2.5.1
+    container_name: nacos-1
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    environment:
+      MODE: cluster
+      NACOS_SERVERS: nacos-1:8848 nacos-2:8848 nacos-3:8848
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql-master
+      MYSQL_SERVICE_PORT: "3306"
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: "changeme"
+      MYSQL_DB_NAME: nacos
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      NACOS_AUTH_ENABLE: "false"
+    depends_on:
+      mysql-master:
+        condition: service_healthy
+    networks: [parking-net]
+    restart: unless-stopped
+
+  nacos-2:
+    image: nacos/nacos-server:v2.5.1
+    container_name: nacos-2
+    ports:
+      - "8849:8848"
+      - "9849:9848"
+      - "9850:9849"
+    environment:
+      MODE: cluster
+      NACOS_SERVERS: nacos-1:8848 nacos-2:8848 nacos-3:8848
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql-master
+      MYSQL_SERVICE_PORT: "3306"
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: "changeme"
+      MYSQL_DB_NAME: nacos
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      NACOS_AUTH_ENABLE: "false"
+    depends_on:
+      mysql-master:
+        condition: service_healthy
+    networks: [parking-net]
+    restart: unless-stopped
+
+  nacos-3:
+    image: nacos/nacos-server:v2.5.1
+    container_name: nacos-3
+    ports:
+      - "8850:8848"
+      - "9850:9848"
+      - "9851:9849"
+    environment:
+      MODE: cluster
+      NACOS_SERVERS: nacos-1:8848 nacos-2:8848 nacos-3:8848
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql-master
+      MYSQL_SERVICE_PORT: "3306"
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: "changeme"
+      MYSQL_DB_NAME: nacos
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      NACOS_AUTH_ENABLE: "false"
+    depends_on:
+      mysql-master:
+        condition: service_healthy
+    networks: [parking-net]
+    restart: unless-stopped
+
+  # ===================== MySQL 主从 (GTID) =====================
+  mysql-master:
+    image: mysql:8.0
+    container_name: mysql-master
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "changeme"
+    command:
+      - --server-id=1
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --gtid_mode=ON
+      - --enforce-gtid-consistency=ON
+      - --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql-master-data:/var/lib/mysql
+      - ./docker/mysql/master/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - ./docker/mysql/init/master:/docker-entrypoint-initdb.d:ro
+      - ./sql:/sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pchangeme"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [parking-net]
+    restart: unless-stopped
+
+  mysql-slave:
+    image: mysql:8.0
+    container_name: mysql-slave
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "changeme"
+    command:
+      - --server-id=2
+      - --gtid_mode=ON
+      - --enforce-gtid-consistency=ON
+      - --read_only=ON
+      - --super_read_only=ON
+      - --relay_log=relay-bin
+      - --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql-slave-data:/var/lib/mysql
+      - ./docker/mysql/slave/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - ./docker/mysql/init/slave:/docker-entrypoint-initdb.d:ro
+    depends_on:
+      mysql-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pchangeme"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [parking-net]
+    restart: unless-stopped
+
+  # ===================== Redis 哨兵 =====================
+  redis-master:
+    image: redis:7
+    container_name: redis-master
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    networks: [parking-net]
+    restart: unless-stopped
+
+  redis-replica-1:
+    image: redis:7
+    container_name: redis-replica-1
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--replicaof", "redis-master", "6379", "--appendonly", "yes"]
+    depends_on: [redis-master]
+    networks: [parking-net]
+    restart: unless-stopped
+
+  redis-replica-2:
+    image: redis:7
+    container_name: redis-replica-2
+    ports:
+      - "6381:6379"
+    command: ["redis-server", "--replicaof", "redis-master", "6379", "--appendonly", "yes"]
+    depends_on: [redis-master]
+    networks: [parking-net]
+    restart: unless-stopped
+
+  redis-sentinel-1:
+    image: redis:7
+    container_name: redis-sentinel-1
+    ports:
+      - "26379:26379"
+    command: ["sh", "-c", "IP=$(getent hosts redis-master | awk 'NR==1{print $$1}'); sed \"s/__MASTER_IP__/$$IP/\" /conf-tpl/sentinel.conf > /data/sentinel.conf; redis-server /data/sentinel.conf --sentinel"]
+    volumes:
+      - ./docker/redis/sentinel.conf:/conf-tpl/sentinel.conf:ro
+    depends_on: [redis-master, redis-replica-1, redis-replica-2]
+    networks: [parking-net]
+    restart: unless-stopped
+
+  redis-sentinel-2:
+    image: redis:7
+    container_name: redis-sentinel-2
+    ports:
+      - "26380:26379"
+    command: ["sh", "-c", "IP=$(getent hosts redis-master | awk 'NR==1{print $$1}'); sed \"s/__MASTER_IP__/$$IP/\" /conf-tpl/sentinel.conf > /data/sentinel.conf; redis-server /data/sentinel.conf --sentinel"]
+    volumes:
+      - ./docker/redis/sentinel.conf:/conf-tpl/sentinel.conf:ro
+    depends_on: [redis-master, redis-replica-1, redis-replica-2]
+    networks: [parking-net]
+    restart: unless-stopped
+
+  redis-sentinel-3:
+    image: redis:7
+    container_name: redis-sentinel-3
+    ports:
+      - "26381:26379"
+    command: ["sh", "-c", "IP=$(getent hosts redis-master | awk 'NR==1{print $$1}'); sed \"s/__MASTER_IP__/$$IP/\" /conf-tpl/sentinel.conf > /data/sentinel.conf; redis-server /data/sentinel.conf --sentinel"]
+    volumes:
+      - ./docker/redis/sentinel.conf:/conf-tpl/sentinel.conf:ro
+    depends_on: [redis-master, redis-replica-1, redis-replica-2]
+    networks: [parking-net]
+    restart: unless-stopped
+
+volumes:
+  mysql-master-data:
+  mysql-slave-data:
