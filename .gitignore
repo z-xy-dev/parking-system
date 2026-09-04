@@ -28,8 +28,9 @@ Thumbs.db
 # Maven
 .mvn/wrapper/maven-wrapper.jar
 
-# Temp
+# Temp (注意：start-services.bat 是项目启动脚本，已在白名单中纳入版本控制)
 *.bat
+!start-services.bat
 
 # WorkBuddy project data (not source)
 .workbuddy/

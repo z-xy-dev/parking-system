@@ -26,6 +26,16 @@ public class AuthFilter implements GlobalFilter, Ordered {
             "/api/parking/detail"
     );
 
+    // Knife4j / Swagger 文档相关路径（含子路径匹配），网关聚合文档需要免鉴权访问
+    private static final List<String> SWAGGER_PATHS = List.of(
+            "v3/api-docs",
+            "/doc.html",
+            "/webjars/",
+            "/swagger-resources",
+            "/swagger-ui",
+            "/favicon.ico"
+    );
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
@@ -39,7 +49,13 @@ public class AuthFilter implements GlobalFilter, Ordered {
             return response.setComplete();
         }
 
+        // 白名单放行（前缀匹配）
         if (WHITE_LIST.stream().anyMatch(path::startsWith)) {
+            return chain.filter(exchange);
+        }
+
+        // Swagger / Knife4j 文档相关路径放行（包含匹配）
+        if (SWAGGER_PATHS.stream().anyMatch(path::contains)) {
             return chain.filter(exchange);
         }
 
