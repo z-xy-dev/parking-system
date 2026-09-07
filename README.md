@@ -1,373 +1,270 @@
-# 共享停车位系统
+# 共享停车位系统 · 上线部署文档
 
-[![Build](https://github.com/z-xy-dev/parking-system/actions/workflows/ci.yml/badge.svg)](https://github.com/z-xy-dev/parking-system/actions/workflows/ci.yml)
-
-> CI 工作流见 `.github/workflows/ci.yml`（推送后自动跑 `mvn clean package`）。
+> 本文档面向**生产 / 公网部署**场景，覆盖从服务器准备、数据库初始化、服务启动到 Nginx 反向代理的完整流程。
+> 本地开发与快速启动说明见 Git 历史中的原 README。
 
 基于 Spring Cloud Alibaba 微服务架构的共享停车位预订平台，实现用户注册登录、车位发布与搜索、订单管理、模拟支付等完整业务闭环。
 
-## 技术栈
+## 一、技术栈
 
 | 层面 | 技术 |
 |------|------|
 | 微服务框架 | Spring Boot 3.2 + Spring Cloud 2023 + Spring Cloud Alibaba 2023 |
-| 注册中心 | Nacos 3.x |
+| 注册中心 | Nacos 2.x/3.x（standalone） |
 | API 网关 | Spring Cloud Gateway（JWT 统一鉴权） |
 | 服务调用 | OpenFeign + LoadBalancer |
-| 分布式锁 | Redisson（Redis 分布式锁，防止并发抢单） |
-| 熔断降级 | Resilience4j（Feign 熔断器 + Fallback 降级） |
+| 分布式锁 | Redisson（Redis 分布式锁） |
+| 熔断降级 | Resilience4j（Feign 熔断 + Fallback） |
 | 数据库 | MySQL 8.0（每服务独立数据库） |
-| ORM | MyBatis-Plus 3.5（乐观锁 @Version） |
+| ORM | MyBatis-Plus 3.5 |
 | 认证 | JWT + BCrypt |
-| 接口文档 | Knife4j (Swagger) |
 | 前端 | Vue 3 + Element Plus + Vite |
-| 工具库 | Hutool |
-| JDK | 17 |
 
-## 项目结构
+## 二、服务拓扑
 
-```
-parking-system/
-├── parking-common/          # 公共模块（Result 封装、JWT 工具、全局异常处理）
-├── gateway-service/  :8080  # API 网关（路由分发、JWT 鉴权、文档聚合）
-├── user-service/     :8081  # 用户服务（注册、登录、角色管理）
-├── parking-service/  :8082  # 车位服务（发布、搜索、管理）
-├── order-service/    :8085  # 订单服务（预订、取消、完成、删除，Feign 调用 parking/payment）
-├── payment-service/  :8084  # 支付服务（模拟支付）
-├── parking-web/      :5173  # Vue 3 前端
-├── sql/                     # 数据库初始化脚本
-├── scripts/                 # 运维脚本（start-ha.sh / stop-ha.ps1）
-└── nginx/                   # 网关高可用 VIP 配置（nginx.conf）
-```
-
-## 架构图
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| gateway-service | 8080 | API 网关（路由分发、JWT 鉴权） |
+| user-service | 8081 | 用户服务（注册、登录、角色管理） |
+| parking-service | 8082 | 车位服务（发布、搜索、管理） |
+| payment-service | 8084 | 支付服务（模拟支付） |
+| order-service | 8085 | 订单服务（预订、取消、完成） |
+| parking-web | 5173(dev) / 静态(prod) | Vue 3 前端 |
 
 ```
-                    ┌───────────┐
-                    │  Nacos    │
-                    │  :8848    │
-                    └─────┬─────┘
-                          │ 服务注册/发现
-              ┌───────────┼───────────┐
-              │           │           │
-     ┌────────▼───┐ ┌─────▼────┐ ┌───▼──────┐
-     │  Gateway   │ │  User    │ │ Parking  │
-     │  :8080     │ │  :8081   │ │ :8082    │
-     │ JWT 鉴权   │ └─────┬────┘ └───┬──────┘
-     └─────┬──────┘       │          │
-           │         ┌────▼────┐ ┌───▼──────┐
-           │         │  Order  │ │ Payment  │
-           │         │  :8085  │ │ :8084    │
-           │         │ ┌──┬──┐ │ └──────────┘
-           │         │ │Feign│ │     ▲
-           │         │ └──┬└──┘ │     │ Feign(熔断降级)
-           │         │    │     └─────┘
-           │         │ ┌──▼──────┐
-           │         │ │  Redis  │ 分布式锁+幂等
-           │         │ │  :6379  │
-           │         │ └─────────┘
-     ┌─────▼─────┐
-     │ Vue3 前端  │
-     │  :5173    │
-     └───────────┘
+客户端 → Nginx(:80) → Gateway(:8080) → 各业务服务(Nacos 注册发现)
+                                        ├── Redis(:6379) 分布式锁/幂等
+                                        └── MySQL(:3306) 每服务独立库
 ```
 
-## 项目展示
+## 三、功能清单
 
-| 首页 / 车位列表 | 车位详情（可视化选位） | 订单详情（含支付信息） |
-|:---:|:---:|:---:|
-| ![首页](docs/screenshots/01-home.png) | ![车位详情](docs/screenshots/02-parking-detail.png) | ![订单详情](docs/screenshots/03-order-detail.png) |
+- **用户体系**：注册绑定车牌、USER/OWNER 双角色、JWT 网关统一鉴权
+- **车位管理**：业主发布车位自动生成 N 个独立车位、关键词搜索、可视化选位（前端网格 + 5s 自动刷新）
+- **订单业务**：一人一单防恶意占位、三层并发防超卖（Redis 幂等 → Redisson 分布式锁 → DB 原子更新）、超时按 1.5 倍单价计费
+- **支付结算**：下单只占位不扣款、出场一次性结算、支付幂等防重复扣款（模拟实现，未接真实渠道）
+- **容错**：Feign 熔断降级、Redis 异常自动降级为纯 DB 流程、占位失败自动补偿释放
 
-## 核心功能
+## 四、生产环境要求
 
-### 用户体系
-- **注册绑定车牌**：用户注册时必须填写车牌号，一人一车一牌
-- **角色区分**：普通用户（USER）可浏览预订车位，业主（OWNER）可发布管理车位
-- **JWT 鉴权**：网关统一校验 token，转发 X-User-Id / X-User-Role 给下游服务
+| 软件 | 版本 | 说明 |
+|------|------|------|
+| JDK | 17+ | 推荐 Temurin / OpenJDK 17 |
+| Maven | 3.8+ | 仅构建时需要 |
+| MySQL | 8.0+ | 生产建议云 RDS 或主从 |
+| Redis | 6.x+ | 生产建议云 Redis 或哨兵版 |
+| Nacos | 2.x/3.x | standalone 模式，3.x 控制台端口 8083 |
+| Node.js | 18+ | 仅构建前端时需要 |
+| Nginx | 1.2x | 反向代理 + 静态资源托管 |
 
-### 车位管理
-- 业主发布车位（名称、地址、单价、总车位数），发布时自动生成 N 个独立车位明细（编号 1~N）
-- 车位列表搜索（按名称/地址关键词）
-- 独立车位原子占用/释放（DB UPDATE WHERE status='AVAILABLE'，防超卖）
-- 前端可视化车位网格（空闲/已占/已选），5 秒自动刷新状态
+**服务器最低配置（单机部署）**：2C4G，40G 磁盘；公网开放 80/443。
 
-### 订单业务
-- **一人一单**：同一用户同时只能有一个进行中的订单（RESERVED / USING），防止恶意占位
-- **用户选位**：用户在车位详情页可视化选择空闲车位编号（1-N），已被占用的车位不可选
-- **高并发防超卖**（三层并发控制）：
-  - Layer 1: Redis SETNX 幂等性检查（5s 防重复提交）
-  - Layer 2: Redisson 分布式锁 `lock:spot:{spaceId}:{spotNumber}`（等待5s，持有10s）
-  - Layer 3: 数据库原子 UPDATE `WHERE status='AVAILABLE'`（InnoDB 行级锁，最终安全屏障）
-- **熔断降级**：parking-service / payment-service Feign 调用配置 Resilience4j 熔断器 + Fallback 降级
-- **补偿机制**：占位成功但后续流程失败时，finally 块自动释放车位
-- **时间校验**：前后端双重校验，结束时间必须晚于开始时间
-- **金额计算**：总金额 = 单价 × 时长（不足1小时按1小时算）
-- **超时处理**：完成订单时若超过预约结束时间，按 **1.5倍单价** 收取超时费
-- **订单生命周期**：已预订 → 已完成/已取消 → 可删除记录
+## 五、部署流程
 
-### 支付（模拟实现，未接入真实渠道）
+### 5.1 初始化数据库
 
-> ⚠️ **本项目支付为模拟实现**，仅用于演示资金流转与一致性逻辑，**未接入微信 / 支付宝等真实支付渠道，不会产生真实扣款**。生产环境应将 `payment-service` 中的 `PaymentChannel` 实现替换为真实渠道 SDK。
-
-- **结算时机**：下单仅占用车位，**不立即扣款**；在订单「完成」（出场）时**一次性结算**，金额 = 基础费（单价 × 时长，不足 1 小时按 1 小时）+ 超时费（超出预约结束时间按 1.5 倍单价）。
-- **幂等**：支付服务 `pay()` 对同一订单重复结算不会重复扣款。
-- **可观测**：订单表新增 `pay_status`（UNPAID / PAID）字段，详情接口返回支付流水，前端「订单详情」可查看支付信息。
-
-## 快速启动
-
-### 环境要求
-
-| 软件 | 版本要求 | 说明 |
-|------|---------|------|
-| JDK | 17+ | 推荐 Eclipse Temurin / OpenJDK |
-| Maven | 3.8+ | 用于后端构建 |
-| MySQL | 8.0+ | 数据库 |
-| Redis | 6.x+ | 分布式锁 + 幂等性检查 |
-| Node.js | 18+ | 前端构建 |
-| Nacos | 2.x+ | 服务注册中心，需 standalone 模式启动 |
-
-> **Nacos 3.x 注意**：如果使用 Nacos 3.x，控制台端口已改为 **8083**（服务发现端口仍为 8848），且需要配置用户名密码。在各服务的 `application.properties` 中已配置 `spring.cloud.nacos.discovery.username` 和 `password`，默认值为 `nacos / nacos`，请根据实际环境修改。
-
-### 启动步骤
-
-#### 1. 初始化数据库
+将 `sql/` 目录上传到服务器，执行：
 
 ```bash
 mysql -uroot -p --default-character-set=utf8mb4 < sql/init.sql
 ```
 
-该脚本会创建 `user_db`、`parking_db`、`order_db`、`payment_db` 四个数据库及对应表结构，并插入测试数据。
+脚本创建 `user_db` / `parking_db` / `order_db` / `payment_db` 四个库及表结构，并插入测试数据。
 
-> 💡 **字符集提示**：中文测试数据在 Git Bash / PowerShell 默认客户端字符集下可能插入失败（报 `Data too long for column`）。`--default-character-set=utf8mb4` 显式指定客户端字符集即可避免。如已用 navicat/HeidiSQL 等 GUI 导入则不受影响。
+> 已有存量数据时，按需执行 `sql/migration_parking_spot.sql`（独立车位明细表）、`sql/migration_pay_status.sql`（支付状态字段）。
 
-#### 2. 配置数据库连接与中间件（环境变量）
+### 5.2 配置生产环境变量
 
-各服务的 `src/main/resources/application.properties` 已通过环境变量注入敏感配置，默认值即本机开发默认值，**无需修改源码即可本地运行**。生产/其他环境通过环境变量覆盖：
-
-| 环境变量 | 默认值 | 说明 |
-|----------|--------|------|
-| `DB_HOST` | `localhost` | MySQL 地址 |
-| `DB_PORT` | `3306` | MySQL 端口 |
-| `DB_USERNAME` | `root` | MySQL 用户名 |
-| `DB_PASSWORD` | `<your-mysql-password>` | MySQL 密码（**请勿在源码/仓库中写入真实密码**，通过环境变量注入，见下方「本地开发环境变量」） |
-| `REDIS_HOST` | `localhost` | Redis 地址 |
-| `REDIS_PORT` | `6379` | Redis 端口 |
-| `NACOS_HOST` | `localhost` | Nacos 地址 |
-| `NACOS_PORT` | `8848` | Nacos 端口 |
-| `NACOS_PASSWORD` | `<your-nacos-password>` | Nacos 密码（Nacos 3.x） |
-| `JWT_SECRET` | `parking-system-shared-secret-key-2024` | JWT 签名密钥（**生产环境务必覆盖为 ≥32 字节随机字符串**，否则 token 可被伪造，详见下方「安全提示」） |
-
-示例（Linux/Mac 启动服务时注入）：
+所有敏感配置均通过环境变量注入，源码默认值为占位符，**生产必须覆盖**：
 
 ```bash
-DB_PASSWORD='yourStrongPwd' NACOS_PASSWORD='nacos' \
-  java -jar user-service/target/user-service-1.0.0.jar
-```
-
-> ⚠️ 本仓库源码中**不包含任何真实密码**：所有敏感配置均通过环境变量注入，默认值仅为占位符 `changeme`。克隆后请在本地用环境变量设置你自己的实际密码。
-
-> ⚠️ **安全提示（生产必读）**
-> - **MySQL / Nacos 密码**：`changeme` 仅供本地占位，部署前必须通过 `DB_PASSWORD` / `NACOS_PASSWORD` 环境变量覆盖。
-> - **JWT 签名密钥**：默认密钥 `parking-system-shared-secret-key-2024` 是公开字符串，**生产部署前必须通过 `JWT_SECRET` 注入自定义密钥**（≥32 字节随机字符串），否则攻击者可伪造任意用户 token。所有服务（gateway / user / parking / order / payment）启动时设置同一 `JWT_SECRET` 即可保持 token 互通。
-
-**本地开发环境变量**：源码中各密码的默认值均为占位符 `changeme`，启动服务前需在终端导出你本地 MySQL / Nacos 的**实际密码**，否则无法连接：
-
-```bash
-# Linux / macOS / Git Bash
-export DB_PASSWORD='你的MySQL密码'
-export NACOS_PASSWORD='你的Nacos密码'
-java -jar user-service/target/user-service-1.0.0.jar
-```
-
-```powershell
-# Windows PowerShell
-$env:DB_PASSWORD='你的MySQL密码'; $env:NACOS_PASSWORD='你的Nacos密码'
-java -jar user-service/target/user-service-1.0.0.jar
-```
-
-#### 3. 启动 Nacos 和 Redis
-
-```bash
-# Nacos
-cd <nacos-home>
-bin/startup.cmd -m standalone    # Windows
+# 数据库
+export DB_HOST=127.0.0.1
+export DB_PORT=3306
+export DB_USERNAME=root
+export DB_PASSWORD='你的强密码'
 
 # Redis
-redis-server                     # Windows (需提前安装 Redis)
+export REDIS_HOST=127.0.0.1
+export REDIS_PORT=6379
+
+# Nacos
+export NACOS_HOST=127.0.0.1
+export NACOS_PORT=8848
+export NACOS_PASSWORD='你的Nacos密码'
+
+# JWT 密钥（生产必须改为 ≥32 字节随机字符串，否则 token 可被伪造）
+export JWT_SECRET='你的32位以上随机密钥'
 ```
 
-访问 http://localhost:8083/ 确认 Nacos 启动成功（Nacos 3.x 控制台端口为 **8083**，服务发现端口仍为 8848）。
-确认 Redis 在 localhost:6379 运行（可用 `redis-cli ping` 验证返回 PONG）。
+> ⚠️ **安全提示**：所有服务（gateway/user/parking/order/payment）必须使用**同一个** `JWT_SECRET`，token 才能互通；不同服务不要混用密钥。
 
-#### 4. 构建后端微服务
+### 5.3 构建后端
 
 ```bash
-cd parking-system
+# 本机构建后上传 jar，或直接在服务器构建
 mvn clean package -DskipTests
 ```
 
-构建成功后，各服务 target 目录下会生成对应的 JAR 包。
+产物：各服务 `target/*.jar`。
 
-#### 5. 启动后端微服务
-
-按以下顺序启动（建议每个服务间隔 3-5 秒，确保上一个服务注册到 Nacos 后再启动下一个）：
-
-```bash
-# 1. 用户服务
-java -jar user-service/target/user-service-1.0.0.jar
-
-# 2. 车位服务
-java -jar parking-service/target/parking-service-1.0.0.jar
-
-# 3. 支付服务
-java -jar payment-service/target/payment-service-1.0.0.jar
-
-# 4. 订单服务
-java -jar order-service/target/order-service-1.0.0.jar
-
-# 5. 网关服务（最后启动，路由依赖其他服务已注册）
-java -jar gateway-service/target/gateway-service-1.0.0.jar
-```
-
-#### 6. 启动前端
+### 5.4 构建前端
 
 ```bash
 cd parking-web
 npm install
-npm run dev
+npm run build
+# 产物在 parking-web/dist/，上传到服务器，由 Nginx 托管
 ```
 
-### 访问地址
+### 5.5 启动后端服务
 
-| 地址 | 说明 |
-|------|------|
-| http://localhost:5173 | 前端页面 |
-| http://localhost:8080/doc.html | 接口文档 (Knife4j) |
-| http://localhost:8848/nacos | Nacos 控制台（Nacos 3.x 请使用 8083 端口） (nacos/nacos) |
+按顺序启动（每服务间隔 3-5 秒，确保注册到 Nacos 后再启动下一个）：user → parking → payment → order → gateway（网关最后启动）。
 
-### 测试账号
-
-| 用户名 | 密码 | 角色 | 车牌号 |
-|--------|------|------|--------|
-| admin | 123456 | 业主 | 粤A88888 |
-| user1 | 123456 | 普通用户 | 粤A12345 |
-
-### 停止服务
-
-直接终止对应的 Java 和 Node.js 进程即可。也可以批量停止：
+**方式 A：nohup 脚本（简单）**
 
 ```bash
-# Linux/Mac
-pkill -f 'service/target'
+#!/bin/bash
+# start-prod.sh
+export DB_PASSWORD='你的强密码' NACOS_PASSWORD='你的Nacos密码' JWT_SECRET='你的32位以上随机密钥'
 
-# Windows (PowerShell)
-Get-CimInstance Win32_Process -Filter "Name='java.exe'" | Where-Object { $_.CommandLine -like '*-jar *service/target*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+nohup java -jar user-service/target/user-service-1.0.0.jar    --server.port=8081 >> logs/user.log 2>&1 &
+nohup java -jar parking-service/target/parking-service-1.0.0.jar --server.port=8082 >> logs/parking.log 2>&1 &
+nohup java -jar payment-service/target/payment-service-1.0.0.jar --server.port=8084 >> logs/payment.log 2>&1 &
+nohup java -jar order-service/target/order-service-1.0.0.jar  --server.port=8085 >> logs/order.log 2>&1 &
+sleep 15
+nohup java -jar gateway-service/target/gateway-service-1.0.0.jar --server.port=8080 >> logs/gateway.log 2>&1 &
 ```
 
-## 高可用部署 (HA)
+**方式 B：systemd 托管（推荐生产）**
 
-本项目服务网格已具备 HA 基础（Nacos 服务发现、网关 `lb://` 路由、Feign 按服务名调用 + Resilience4j 熔断、Redisson 分布式锁、JWT 无状态），并内置了**健康检查驱动的故障转移**与**冗余实例启动脚本**。
+以 order-service 为例，`/etc/systemd/system/parking-order.service`：
 
-### 自带能力
+```ini
+[Unit]
+Description=Parking Order Service
+After=network.target
 
-- 每个服务均暴露 `/actuator/health`（liveness/readiness 探针）
-- 优雅停机：`server.shutdown=graceful` + 30s 超时，停机时自动从负载池摘除
-- 网关侧 `spring.cloud.loadbalancer.health-check`：按服务探活，**自动剔除不健康后端实例**（故障转移）
-- 横向扩展安全：Redisson 分布式锁 + DB 原子 `UPDATE ... WHERE status='AVAILABLE'`，多实例并发抢同一车位不超卖
+[Service]
+User=root
+Environment=DB_HOST=127.0.0.1
+Environment=DB_PORT=3306
+Environment=DB_USERNAME=root
+Environment=DB_PASSWORD=你的强密码
+Environment=REDIS_HOST=127.0.0.1
+Environment=REDIS_PORT=6379
+Environment=NACOS_HOST=127.0.0.1
+Environment=NACOS_PORT=8848
+Environment=NACOS_PASSWORD=你的Nacos密码
+Environment=JWT_SECRET=你的32位以上随机密钥
+ExecStart=/usr/local/jdk-17/bin/java -jar /opt/parking/order-service-1.0.0.jar --server.port=8085
+Restart=always
+RestartSec=10
 
-### 一键启动 2× 冗余拓扑
-
-`scripts/start-ha.sh` 会启动 **每个后端 2 实例 + 网关 2 实例（共 10 个 JVM）**，全部注册到 Nacos，互相通过服务名负载均衡：
-
-| 服务 | 实例端口 |
-|------|----------|
-| gateway-service | 8080, 8086 |
-| user-service | 8081, 8091 |
-| parking-service | 8082, 8092 |
-| payment-service | 8084, 8094 |
-| order-service | 8085, 8095 |
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-# Linux/Mac（Windows 用 Git Bash 运行）
-bash scripts/start-ha.sh
-
-# 停止全部实例（Windows PowerShell）
-powershell -File scripts/stop-ha.ps1
+systemctl daemon-reload
+systemctl enable --now parking-order
+# 其余服务（user/parking/payment/gateway）按同样方式创建
 ```
 
-### 网关 VIP（Nginx）
+### 5.6 Nginx 反向代理
 
-`nginx/nginx.conf` 将 2 个网关组成 upstream，在 `:80` 提供统一入口并做 `health_check`：
+前端静态资源 + API 统一入口：
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    # 前端静态资源
+    root /opt/parking-web/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API 反代到网关
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
 
 ```bash
-# 安装 Nginx 后
-nginx -p nginx -c nginx/nginx.conf
-# 统一访问：http://localhost  （自动转发到存活网关）
+nginx -t && nginx -s reload
 ```
 
-### 基础设施集群（Docker Compose）
+> 生产建议：配置 HTTPS（Let's Encrypt / 云证书），并在网关/防火墙层限制仅 80/443 对外暴露，8080-8085 端口不对公网开放。
 
-应用层冗余之外，基础设施也可用 `docker-compose.infra.yml` 一键起集群，消除 Nacos / MySQL / Redis 单点：
+### 5.7 访问验证
 
-| 组件 | 拓扑 | 发布端口 |
-|------|------|----------|
-| Nacos | 3 节点集群（共享 MySQL） | 8848 / 8849 / 8850 |
-| MySQL | 主从（GTID 复制） | 主 3306 / 从 3307 |
-| Redis | 1 主 + 2 从 + 3 Sentinel | 主 6379 / 从 6380·6381 / 哨兵 26379·26380·26381 |
+- 前端：`http://your-domain.com/`
+- 接口文档：`http://your-domain.com/api/doc.html`（Knife4j，经网关聚合）
+- Nacos 控制台：`http://server-ip:8083/nacos`（3.x）确认 5 个服务均在线
+
+测试账号（仅演示环境，**上线后务必修改或删除**）：
+
+| 用户名 | 密码 | 角色 |
+|--------|------|------|
+| admin | 123456 | 业主 |
+| user1 | 123456 | 普通用户 |
+
+## 六、环境变量一览
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `DB_HOST` | localhost | MySQL 地址 |
+| `DB_PORT` | 3306 | MySQL 端口 |
+| `DB_USERNAME` | root | MySQL 用户名 |
+| `DB_PASSWORD` | changeme | MySQL 密码（生产必改） |
+| `REDIS_HOST` | localhost | Redis 地址 |
+| `REDIS_PORT` | 6379 | Redis 端口 |
+| `NACOS_HOST` | localhost | Nacos 地址 |
+| `NACOS_PORT` | 8848 | Nacos 服务发现端口 |
+| `NACOS_PASSWORD` | changeme | Nacos 密码（3.x，生产必改） |
+| `JWT_SECRET` | 公开默认值 | JWT 签名密钥（生产必改，≥32 字节随机串） |
+
+## 七、运维命令
 
 ```bash
-# 启动（首次会自动拉取镜像；本机若有原生 MySQL/Redis/Nacos 占着同端口需先停）
-bash scripts/start-infra.sh up
-bash scripts/start-infra.sh down     # 停止
+# 健康检查（每个服务均暴露）
+curl http://127.0.0.1:8085/actuator/health
+
+# 查看日志
+tail -f logs/order.log
+
+# 优雅停止（systemd）
+systemctl stop parking-order
+
+# 一键停止全部 Java 服务
+ps -ef | grep 'service/target' | grep -v grep | awk '{print $2}' | xargs -r kill
 ```
 
-配置文件位于 `docker/`：MySQL 主从 `my.cnf` + 初始化 SQL（建复制账号、载入 `sql/init.sql`），Redis `sentinel.conf`。
+## 八、常见问题
 
-应用侧接入集群（启动应用时注入以下环境变量）：
+| 现象 | 原因与处理 |
+|------|-----------|
+| 服务连不上数据库 | 检查 `DB_PASSWORD` 是否已注入且与 MySQL 实际密码一致 |
+| 网关路由全部失效 | 各服务是否已注册到 Nacos；服务端口是否被 `SERVER__PORT` 等环境变量干扰 |
+| 前端页面 404 | Nginx 未配置 `try_files` 回退到 index.html（前端为 History 路由） |
+| 接口文档打不开 | 确认网关已启动且服务已注册，Knife4j 路径经网关聚合 |
+| 登录 token 无效 | 检查所有服务 `JWT_SECRET` 是否一致 |
+| 中文数据乱码 | 初始化 SQL 需带 `--default-character-set=utf8mb4` |
 
-```bash
-export NACOS_SERVER_ADDR=localhost:8848,localhost:8849,localhost:8850
-export REDIS_SENTINEL_MASTER=mymaster
-export REDIS_SENTINEL_NODES=localhost:26379,localhost:26380,localhost:26381
-# DB_HOST=localhost DB_PORT=3306 连主库即可（生产应改为 ProxySQL/VIP 做故障转移）
-```
+## 九、上线检查清单
 
-> 说明：本机模拟用不同端口跑多实例，**宿主机本身仍是单点**，并非真多机 HA；生产请改用云托管（MSE / RDS 主从 / Redis 哨兵版）或 ≥3 台机器的真实集群。
->
-> Redis 哨兵接入注意：哨兵返回的主节点地址是容器内部 IP，若应用（order-service）跑在宿主机上需通过 Sentinel 享受**透明故障转移**，应把应用也放进同一 Docker 网络（容器化部署）；否则应用默认连 `localhost:6379`（主库发布端口）即可正常运行，哨兵在 Redis 数据面提供高可用。哨兵监控地址在启动时由脚本解析 `redis-master` 容器 IP 注入（Redis 7.4 直接写主机名会在节点停止后无法解析而进入 TILT）。
-
-### 验证要点
-
-- Nacos 控制台 `http://localhost:8848/nacos` 应看到每个服务 **2 个健康实例**
-- 任意 kill 一个后端实例 → 约 10~25s 后网关健康检查自动停止向其路由，流量无缝切到存活节点
-- 多实例并发下单同一车位：仅 1 单成功，其余返回「车位已被占用」
-
-> 说明：应用层冗余 + 故障转移已就绪。基础设施层（Nacos 集群、MySQL 主从、Redis Sentinel、Nginx 双机 + Keepalived）需在生产环境另行部署。
-
-## API 接口
-
-| 服务 | 接口 | 方法 | 鉴权 | 说明 |
-|------|------|------|------|------|
-| 用户 | /api/user/register | POST | 公开 | 用户注册（含车牌绑定） |
-| 用户 | /api/user/login | POST | 公开 | 用户登录 |
-| 车位 | /api/parking/list | GET | 公开 | 车位列表 |
-| 车位 | /api/parking/detail/{id} | GET | 公开 | 车位详情 |
-| 车位 | /api/parking/publish | POST | 业主 | 发布车位 |
-| 车位 | /api/parking/owner | GET | 业主 | 我的车位 |
-| 车位 | /api/parking/spots/{id} | GET | 公开 | 查询独立车位状态（1-N编号+空闲/已占） |
-| 车位 | /api/parking/internal/reserve-spot/{id}/{num} | PUT | 内部 | 原子占用车位（DB行级锁） |
-| 车位 | /api/parking/internal/release-spot/{id}/{num} | PUT | 内部 | 原子释放车位 |
-| 订单 | /api/order/create | POST | 登录 | 创建订单（选位+一人一单+分布式锁） |
-| 订单 | /api/order/my | GET | 登录 | 我的订单 |
-| 订单 | /api/order/cancel/{id} | PUT | 登录 | 取消订单 |
-| 订单 | /api/order/complete/{id} | PUT | 登录 | 完成订单（含超时计费） |
-| 订单 | /api/order/{id} | DELETE | 登录 | 删除订单记录 |
-| 支付 | /api/payment/internal/pay/{orderId} | POST | 内部(网关) | 出场时一次性模拟结算（仅网关可调用，前端不直连） |
-
-## 业务流程
-
-1. **注册/登录**：BCrypt 加密密码 → 签发 JWT（含 userId、role）→ 网关统一鉴权
-2. **发布车位**：业主登录 → 填写车位信息 → 上架
-3. **预订车位**：搜索车位 → 查看详情 → **可视化选择空闲车位编号** → 选择时段 → 下单（分布式锁+DB原子占位，**此时仅占位不扣款**）
-4. **完成订单**：正常完成直接释放车位；超时完成按 1.5 倍单价收取超时费后释放
-5. **服务调用链**：order-service → Feign → parking-service（扣减/释放车位）→ Feign → payment-service（出场时一次性模拟结算）
+- [ ] `DB_PASSWORD` / `NACOS_PASSWORD` 已改为强密码（非 changeme）
+- [ ] `JWT_SECRET` 已改为 ≥32 字节随机字符串，且 5 个服务一致
+- [ ] 测试账号已修改或删除
+- [ ] 8080-8085 端口未对公网开放（仅开放 80/443）
+- [ ] HTTPS 已配置
+- [ ] 数据库已定时备份（建议每日全量 + binlog）
+- [ ] 支付为模拟实现，接入真实渠道前请替换 `PaymentChannel` 实现
