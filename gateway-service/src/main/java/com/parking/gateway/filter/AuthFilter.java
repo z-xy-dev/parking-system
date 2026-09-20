@@ -1,6 +1,7 @@
 package com.parking.gateway.filter;
 
 import com.parking.common.utils.JwtUtil;
+import io.jsonwebtoken.Claims;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -68,14 +69,11 @@ public class AuthFilter implements GlobalFilter, Ordered {
 
         String token = authHeader.substring(7);
         try {
-            if (JwtUtil.isExpired(token)) {
-                ServerHttpResponse response = exchange.getResponse();
-                response.setStatusCode(HttpStatus.UNAUTHORIZED);
-                return response.setComplete();
-            }
-            Long userId = JwtUtil.getUserId(token);
-            String role = JwtUtil.getRole(token);
-            String carPlate = JwtUtil.getCarPlate(token);
+            // 一次解析拿到 Claims，过期/非法由下方 catch 统一返回 401（不再每条字段各验签一次）
+            Claims claims = JwtUtil.parse(token);
+            Long userId = claims.get("userId", Long.class);
+            String role = claims.get("role", String.class);
+            String carPlate = claims.get("carPlate", String.class);
             ServerHttpRequest mutatedRequest = request.mutate()
                     .headers(headers -> {
                         // 必须先清除客户端自带的身份头，否则伪造 X-User-Id 即可越权冒充他人

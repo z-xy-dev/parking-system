@@ -12,12 +12,6 @@ import java.util.Map;
 @FeignClient(name = "parking-service", fallbackFactory = ParkingFeignFallbackFactory.class)
 public interface ParkingFeignClient {
 
-    @PutMapping("/api/parking/internal/decrement/{id}")
-    void decrementSpot(@PathVariable Long id);
-
-    @PutMapping("/api/parking/internal/increment/{id}")
-    void incrementSpot(@PathVariable Long id);
-
     @GetMapping("/api/parking/detail/{id}")
     Map<String, Object> getSpaceDetail(@PathVariable Long id);
 
@@ -32,4 +26,7 @@ public interface ParkingFeignClient {
 
     @PutMapping("/api/parking/internal/release-spot/{spaceId}/{spotNumber}")
     Map<String, Object> releaseSpot(@PathVariable Long spaceId, @PathVariable Integer spotNumber);
+
+    @PutMapping("/api/parking/internal/sync-available/{spaceId}")
+    void syncAvailableCount(@PathVariable Long spaceId);
 }

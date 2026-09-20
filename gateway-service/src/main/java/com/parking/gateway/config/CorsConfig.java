@@ -17,7 +17,7 @@ public class CorsConfig {
      * 允许的来源白名单。生产环境必须通过 CORS_ALLOWED_ORIGINS 显式指定站点域名，
      * 逗号分隔，例如 https://parking.example.com,https://admin.example.com
      */
-    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:8080,http://127.0.0.1:5173}")
+    @Value("${cors.allowed-origins:http://localhost:*,http://127.0.0.1:*,http://0.0.0.0:*}")
     private String allowedOrigins;
 
     @Bean

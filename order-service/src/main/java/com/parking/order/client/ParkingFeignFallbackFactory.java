@@ -20,16 +20,6 @@ public class ParkingFeignFallbackFactory implements FallbackFactory<ParkingFeign
         log.error("parking-service 熔断降级触发, 原因: {}", cause.getMessage());
         return new ParkingFeignClient() {
             @Override
-            public void decrementSpot(Long id) {
-                log.warn("降级: decrementSpot 跳过, spaceId={}", id);
-            }
-
-            @Override
-            public void incrementSpot(Long id) {
-                log.warn("降级: incrementSpot 跳过, spaceId={}", id);
-            }
-
-            @Override
             public Map<String, Object> getSpaceDetail(Long id) {
                 log.warn("降级: getSpaceDetail 返回空, spaceId={}", id);
                 return Collections.emptyMap();
@@ -57,6 +47,11 @@ public class ParkingFeignFallbackFactory implements FallbackFactory<ParkingFeign
             public Map<String, Object> releaseSpot(Long spaceId, Integer spotNumber) {
                 log.warn("降级: releaseSpot 返回失败, spaceId={}, spot={}", spaceId, spotNumber);
                 return degradedResult(false, true);
+            }
+
+            @Override
+            public void syncAvailableCount(Long spaceId) {
+                log.warn("降级: syncAvailableCount 跳过, spaceId={}", spaceId);
             }
         };
     }

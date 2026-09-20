@@ -11,7 +11,5 @@ public interface ParkingService {
     void publish(ParkingSpace space);
     void update(ParkingSpace space);
     void updateStatus(Long id, String status);
-    void decrementSpot(Long id);
-    void incrementSpot(Long id);
     List<Map<String, Object>> getOwnerSpaces(Long ownerId);
 }

@@ -28,9 +28,10 @@ Thumbs.db
 # Maven
 .mvn/wrapper/maven-wrapper.jar
 
-# Temp (注意：start-services.bat 是项目启动脚本，已在白名单中纳入版本控制)
+# Windows 启动脚本：*.bat 一律忽略（本地那份含真实配置，不入库）
+# 只把不含凭据的可移植模板纳入版本控制
 *.bat
-!start-services.bat
+!start-services.example.bat
 
 # WorkBuddy project data (not source)
 .workbuddy/
@@ -50,3 +51,6 @@ work/
 
 # 本地运行备忘（含真实密码，勿上传）
 LOCAL_NOTES.md
+
+# 本机运行配置副本（含明文连接信息，勿上传）
+config/

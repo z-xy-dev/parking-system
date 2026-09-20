@@ -79,31 +79,6 @@ public class ParkingServiceImpl implements ParkingService {
     }
 
     @Override
-    public void decrementSpot(Long id) {
-        ParkingSpace space = detail(id);
-        if (space.getAvailableSpots() <= 0) {
-            throw new BizException("车位已满");
-        }
-        int remaining = space.getAvailableSpots() - 1;
-        space.setAvailableSpots(remaining);
-        if (remaining == 0) {
-            space.setStatus("FULL");
-        }
-        parkingSpaceMapper.updateById(space);
-    }
-
-    @Override
-    public void incrementSpot(Long id) {
-        ParkingSpace space = detail(id);
-        int newCount = Math.min(space.getAvailableSpots() + 1, space.getTotalSpots());
-        space.setAvailableSpots(newCount);
-        if ("FULL".equals(space.getStatus()) && newCount > 0) {
-            space.setStatus("AVAILABLE");
-        }
-        parkingSpaceMapper.updateById(space);
-    }
-
-    @Override
     public List<Map<String, Object>> getOwnerSpaces(Long ownerId) {
         List<ParkingSpace> list = parkingSpaceMapper.selectList(
                 new LambdaQueryWrapper<ParkingSpace>().eq(ParkingSpace::getOwnerId, ownerId));

@@ -1,5 +1,6 @@
 package com.parking.payment.controller;
 
+import com.parking.common.exception.BizException;
 import com.parking.common.result.Result;
 import com.parking.payment.entity.PaymentRecord;
 import com.parking.payment.service.PaymentService;
@@ -38,7 +39,13 @@ public class PaymentController {
 
     @Operation(summary = "查询支付记录")
     @GetMapping("/records/{orderId}")
-    public Result<?> records(@Parameter(description = "订单ID") @PathVariable Long orderId) {
-        return Result.ok(paymentService.getByOrderId(orderId));
+    public Result<?> records(@Parameter(description = "订单ID") @PathVariable Long orderId,
+                             @Parameter(hidden = true) @RequestHeader("X-User-Id") Long userId) {
+        List<PaymentRecord> records = paymentService.getByOrderId(orderId);
+        // 支付流水只属于下单人本人；列表非空但含他人记录即拒绝，避免越权查看金额
+        if (!records.isEmpty() && records.stream().anyMatch(r -> !r.getUserId().equals(userId))) {
+            throw new BizException(403, "无权查看该订单的支付记录");
+        }
+        return Result.ok(records);
     }
 }

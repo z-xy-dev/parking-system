@@ -7,6 +7,7 @@ import java.util.Map;
 public interface OrderService {
     BookingOrder create(BookingOrder order);
     void cancel(Long orderId, Long userId);
+    void startUse(Long orderId, Long userId);
     void complete(Long orderId, Long userId);
     void delete(Long orderId, Long userId);
     BookingOrder detail(Long orderId);

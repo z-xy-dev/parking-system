@@ -207,6 +207,20 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
+    public void startUse(Long orderId, Long userId) {
+        BookingOrder order = detail(orderId);
+        if (!order.getUserId().equals(userId)) {
+            throw new BizException(403, "无权操作");
+        }
+        if (!"RESERVED".equals(order.getStatus())) {
+            throw new BizException("当前状态不可开始使用（仅已预订订单可开始）");
+        }
+        order.setStatus("USING");
+        orderMapper.updateById(order);
+    }
+
+    @Override
+    @Transactional
     public void complete(Long orderId, Long userId) {
         BookingOrder order = detail(orderId);
         if (!order.getUserId().equals(userId)) {
@@ -271,7 +285,8 @@ public class OrderServiceImpl implements OrderService {
 
     private void releaseOrderSpot(BookingOrder order) {
         if (order.getSpotNumber() == null || order.getSpotNumber().isBlank()) {
-            parkingFeignClient.incrementSpot(order.getSpaceId());
+            // 旧数据无具体车位编号：无法释放特定车位，改为按车位明细重算可用数（唯一权威口径）
+            parkingFeignClient.syncAvailableCount(order.getSpaceId());
             return;
         }
         try {
@@ -287,7 +302,8 @@ public class OrderServiceImpl implements OrderService {
                 log.warn("释放车位失败(可能已被释放), spaceId={}, spot={}", order.getSpaceId(), spotNum);
             }
         } catch (NumberFormatException e) {
-            parkingFeignClient.incrementSpot(order.getSpaceId());
+            // 车位编号无法解析：同样退化为按明细重算，避免直接 +1 造成计数漂移
+            parkingFeignClient.syncAvailableCount(order.getSpaceId());
         }
     }
 

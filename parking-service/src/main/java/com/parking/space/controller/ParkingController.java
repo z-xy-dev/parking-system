@@ -55,7 +55,16 @@ public class ParkingController {
 
     @Operation(summary = "修改车位信息")
     @PutMapping("/update")
-    public Result<?> update(@RequestBody ParkingSpace space) {
+    public Result<?> update(@RequestBody ParkingSpace space,
+                            @Parameter(hidden = true) @RequestHeader("X-User-Id") Long userId,
+                            @Parameter(hidden = true) @RequestHeader("X-User-Role") String role) {
+        ParkingSpace exist = parkingService.detail(space.getId());
+        if (!"OWNER".equals(role)) {
+            throw new BizException(403, "仅业主可操作");
+        }
+        if (!exist.getOwnerId().equals(userId)) {
+            throw new BizException(403, "只能操作自己的车位");
+        }
         parkingService.update(space);
         return Result.ok();
     }
@@ -130,17 +139,10 @@ public class ParkingController {
         return Result.ok(result);
     }
 
-    @Operation(summary = "内部-扣减车位（旧接口兼容）")
-    @PutMapping("/internal/decrement/{id}")
-    public Result<?> decrementSpot(@PathVariable Long id) {
-        parkingService.decrementSpot(id);
-        return Result.ok();
-    }
-
-    @Operation(summary = "内部-释放车位（旧接口兼容）")
-    @PutMapping("/internal/increment/{id}")
-    public Result<?> incrementSpot(@PathVariable Long id) {
-        parkingService.incrementSpot(id);
+    @Operation(summary = "内部-按车位明细重算可用数（唯一权威口径）")
+    @PutMapping("/internal/sync-available/{spaceId}")
+    public Result<?> syncAvailableCount(@PathVariable Long spaceId) {
+        parkingSpotService.syncAvailableCount(spaceId);
         return Result.ok();
     }
 }

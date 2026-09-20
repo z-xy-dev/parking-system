@@ -68,6 +68,14 @@ public class OrderController {
         return Result.ok();
     }
 
+    @Operation(summary = "开始使用")
+    @PutMapping("/use/{id}")
+    public Result<?> startUse(@Parameter(description = "订单ID") @PathVariable Long id,
+                              @Parameter(hidden = true) @RequestHeader("X-User-Id") Long userId) {
+        orderService.startUse(id, userId);
+        return Result.ok();
+    }
+
     @Operation(summary = "订单详情（含车位信息与下单用户基本信息）")
     @GetMapping("/detail/{id}")
     public Result<Map<String, Object>> detail(

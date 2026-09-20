@@ -71,31 +71,6 @@ class ParkingServiceImplTest {
     }
 
     @Test
-    void testDecrementSpot() {
-        when(parkingSpaceMapper.selectById(1L)).thenReturn(testSpace);
-        parkingService.decrementSpot(1L);
-        assertEquals(49, testSpace.getAvailableSpots());
-        verify(parkingSpaceMapper, times(1)).updateById(testSpace);
-    }
-
-    @Test
-    void testDecrementSpotFullException() {
-        testSpace.setAvailableSpots(0);
-        when(parkingSpaceMapper.selectById(1L)).thenReturn(testSpace);
-        assertThrows(BizException.class, () -> parkingService.decrementSpot(1L));
-    }
-
-    @Test
-    void testIncrementSpot() {
-        testSpace.setAvailableSpots(49);
-        testSpace.setStatus("FULL");
-        when(parkingSpaceMapper.selectById(1L)).thenReturn(testSpace);
-        parkingService.incrementSpot(1L);
-        assertEquals(50, testSpace.getAvailableSpots());
-        assertEquals("AVAILABLE", testSpace.getStatus());
-    }
-
-    @Test
     void testListEmpty() {
         Page<ParkingSpace> page = new Page<>(1, 10);
         page.setRecords(List.of());
