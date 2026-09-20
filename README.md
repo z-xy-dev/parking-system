@@ -167,7 +167,7 @@ copy start-services.example.bat start-services.bat
 REM 编辑 start-services.bat 填上自己的密码，然后双击运行
 ```
 
-`start-services.bat` 已被 `.gitignore` 忽略（规则 `*.bat`），所以你填进去的真实密码永远不会进仓库；模板 `start-services.example.bat` 才是入库的那份。
+`start-services.bat` 在 `.gitignore` 的忽略规则里（`*.bat`）：本地副本可以放心填真实密码，不会被提交；仓库只保留不含凭据的模板 `start-services.example.bat`。
 
 **不想手动开 5 个终端？** 用仓库自带脚本（会自动读取 `.env`，见下节）：
 
