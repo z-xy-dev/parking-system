@@ -169,7 +169,38 @@ REM 编辑 start-services.bat 填上自己的密码，然后双击运行
 
 `start-services.bat` 已被 `.gitignore` 忽略（规则 `*.bat`），所以你填进去的真实密码永远不会进仓库；模板 `start-services.example.bat` 才是入库的那份。
 
-### 4. 启动前端
+**不想手动开 5 个终端？** 用仓库自带脚本（会自动读取 `.env`，见下节）：
+
+```bash
+bash scripts/start-backend.sh        # Linux / macOS / Git Bash
+pwsh scripts/start-backend.ps1       # Windows PowerShell
+```
+
+两个脚本默认用 `JAVA_HOME`（未设置则直接用 `java`），日志写到 `logs/<service>.log`。
+
+### 4. 填写本地配置（模板 + 你自己的副本）
+
+仓库里**只有模板**，真实配置一律不入库：
+
+| 文件 | 是否入库 | 用途 |
+| --- | --- | --- |
+| `.env.example` | 入库 | 环境变量模板 |
+| `config/application.example.properties` | 入库 | Spring Boot 外部配置模板 |
+| `.env` | 已忽略 | 你自己的环境变量 |
+| `config/application.properties` | 已忽略 | 你自己的 Spring 外部配置 |
+
+```bash
+cp .env.example .env
+cp config/application.example.properties config/application.properties
+# 然后编辑这两个文件，把 changeme 换成本机 MySQL / Nacos 的真实账号密码
+```
+
+两种方式二选一即可：
+
+- **用 `.env`**：脚本和 `java -jar` 都会从环境变量读取，跨平台通用。
+- **用 `config/application.properties`**：在**项目根目录**执行 `java -jar xxx.jar` 时，Spring Boot 会自动加载它，命令行里就不用再传任何密码参数。
+
+### 5. 启动前端
 
 ```bash
 cd parking-web
@@ -179,7 +210,7 @@ npm run dev        # http://localhost:5173
 
 Vite 已把 `/api` 代理到 `http://localhost:8080`。
 
-### 5. 验证
+### 6. 验证
 
 | 地址 | 说明 |
 | --- | --- |
@@ -199,6 +230,8 @@ Vite 已把 `/api` 代理到 `http://localhost:8080`。
 ## 环境变量
 
 复制 `.env.example` 为 `.env` 并按本机情况填写（`.env` 已被 `.gitignore` 忽略，切勿提交）。各服务通过 `${VAR:默认值}` 读取，也可直接导出到终端。
+
+> 不想用环境变量也可以：复制 `config/application.example.properties` 为 `config/application.properties`，Spring Boot 会自动加载它，效果等价。
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |

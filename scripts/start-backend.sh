@@ -1,24 +1,41 @@
 #!/usr/bin/env bash
-# 一键拉起 5 个微服务（依赖：MySQL 3306 本机、Nacos 8848 + Redis 6379 容器）
-# 说明：DB / Nacos 凭据写在这里，避免出现在命令行里
-export PATH="/usr/bin:/bin:/mingw64/bin:$PATH"
-cd "." || exit 1
-mkdir -p logs
+# 一键拉起 5 个微服务（后台运行，日志落到 logs/）
+# 依赖：MySQL 3306、Nacos 8848、Redis 6379（可用 bash scripts/start-infra.sh up 拉起）
+#
+# 用法：bash scripts/start-backend.sh
+#
+# 凭据来源（优先级从高到低）：
+#   1. 已有环境变量
+#   2. 项目根目录的 .env（复制 .env.example 得到，已被 .gitignore 忽略）
+#   3. 下面的占位默认值 -> 请务必先改成你自己的
+set -e
+cd "$(dirname "$0")/.."
 
-# WorkBuddy 会话注入 SERVER__PORT=0，会被 Spring 映射成 server.port=0（随机端口），必须清掉
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+export DB_HOST=${DB_HOST:-localhost}
+export DB_PORT=${DB_PORT:-3306}
+export DB_USERNAME=${DB_USERNAME:-root}
+export DB_PASSWORD=${DB_PASSWORD:-changeme}
+export NACOS_SERVER_ADDR=${NACOS_SERVER_ADDR:-localhost:8848}
+export NACOS_USERNAME=${NACOS_USERNAME:-nacos}
+export NACOS_PASSWORD=${NACOS_PASSWORD:-changeme}
+export REDIS_HOST=${REDIS_HOST:-localhost}
+export REDIS_PORT=${REDIS_PORT:-6379}
+
+# 某些 IDE/agent 会话会注入 SERVER__PORT=0，会被 Spring 映射成 server.port=0（随机端口）
 unset SERVER__PORT SERVER__HOST server__port
 
-export DB_USERNAME=root
-export DB_PASSWORD=changeme
-export NACOS_USERNAME=nacos
-export NACOS_PASSWORD=nacos
-export REDIS_HOST=localhost
-export REDIS_PORT=6379
-
-J="java"
+JAVA=${JAVA_HOME:+$JAVA_HOME/bin/java}
+JAVA=${JAVA:-java}
+mkdir -p logs
 
 start() {
-  nohup "$J" -jar "$1" --server.port="$2" > "logs/$3.log" 2>&1 &
+  nohup "$JAVA" -jar "$1" --server.port="$2" > "logs/$3.log" 2>&1 &
   echo "[start] $3 -> $2 (pid $!)"
 }
 
@@ -34,4 +51,8 @@ start "gateway-service/target/gateway-service-1.0.0.jar" 8080 gateway
 sleep 18
 
 echo "--- listening ---"
-netstat -ano -p tcp | grep LISTENING | grep -E ":(8080|8081|8082|8084|8085) "
+if command -v netstat >/dev/null 2>&1; then
+  netstat -ano -p tcp 2>/dev/null | grep LISTENING | grep -E ":(8080|8081|8082|8084|8085) " || true
+else
+  ss -ltn 2>/dev/null | grep -E ":(8080|8081|8082|8084|8085) " || true
+fi

@@ -52,5 +52,6 @@ work/
 # 本地运行备忘（含真实密码，勿上传）
 LOCAL_NOTES.md
 
-# 本机运行配置副本（含明文连接信息，勿上传）
-config/
+# 本机运行配置（含明文密码，勿上传）；模板 config/application.example.properties 入库
+config/*
+!config/application.example.properties
